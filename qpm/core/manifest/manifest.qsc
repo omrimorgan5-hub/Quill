@@ -1,0 +1,224 @@
+# manifest.qsc  –  quill.json read / write
+
+C_top("
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+#define MANIFEST_MAX_DEPS 64
+#define MANIFEST_STR 256
+
+typedef struct {
+    char key[MANIFEST_STR];
+    char val[MANIFEST_STR];
+} DepEntry;
+
+typedef struct {
+    char name[MANIFEST_STR];
+    char version[MANIFEST_STR];
+    char main[MANIFEST_STR];
+    DepEntry deps[MANIFEST_MAX_DEPS];
+    int dep_count;
+} Manifest;
+
+static Manifest g_manifest;
+static int g_loaded = 0;
+
+static void json_get_string(const char *json, const char *key, char *out, size_t out_n) {
+    out[0] = '\\0';
+    char pattern[MANIFEST_STR + 8];
+    snprintf(pattern, sizeof(pattern), \"\\\"%s\\\"\", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return;
+    p = strchr(p + strlen(pattern), '\"');
+    if (!p) return;
+    p++;
+    const char *q = strchr(p, '\"');
+    if (!q) return;
+    size_t len = (size_t)(q - p);
+    if (len >= out_n) len = out_n - 1;
+    memcpy(out, p, len);
+    out[len] = '\\0';
+}
+
+static void json_get_deps(const char *json, Manifest *m) {
+    m->dep_count = 0;
+    const char *deps = strstr(json, \"\\\"deps\\\"\");
+    if (!deps) return;
+    const char *brace = strchr(deps, '{');
+    if (!brace) return;
+    const char *end = strchr(brace, '}');
+    if (!end) return;
+
+    const char *p = brace + 1;
+    while (p < end && m->dep_count < MANIFEST_MAX_DEPS) {
+        const char *k1 = strchr(p, '\"');
+        if (!k1 || k1 >= end) break;
+        k1++;
+        const char *k2 = strchr(k1, '\"');
+        if (!k2 || k2 >= end) break;
+        const char *v1 = strchr(k2 + 1, '\"');
+        if (!v1 || v1 >= end) break;
+        v1++;
+        const char *v2 = strchr(v1, '\"');
+        if (!v2 || v2 >= end) break;
+
+        size_t klen = (size_t)(k2 - k1);
+        size_t vlen = (size_t)(v2 - v1);
+        if (klen >= MANIFEST_STR) klen = MANIFEST_STR - 1;
+        if (vlen >= MANIFEST_STR) vlen = MANIFEST_STR - 1;
+
+        memcpy(m->deps[m->dep_count].key, k1, klen);
+        m->deps[m->dep_count].key[klen] = '\\0';
+        memcpy(m->deps[m->dep_count].val, v1, vlen);
+        m->deps[m->dep_count].val[vlen] = '\\0';
+        m->dep_count++;
+        p = v2 + 1;
+    }
+}
+
+static int read_file(const char *path, char *buf, size_t buf_n) {
+    FILE *f = fopen(path, \"rb\");
+    if (!f) return -1;
+    size_t n = fread(buf, 1, buf_n - 1, f);
+    buf[n] = '\\0';
+    fclose(f);
+    return 0;
+}
+
+static int write_file(const char *path, const char *data) {
+    FILE *f = fopen(path, \"wb\");
+    if (!f) return -1;
+    fputs(data, f);
+    fputc('\\n', f);
+    fclose(f);
+    return 0;
+}
+
+int manifest_read(const char *path) {
+    char data[16384];
+    if (read_file(path, data, sizeof(data)) != 0) {
+        if (errno == ENOENT)
+            fprintf(stderr, \"no quill.json found — run 'qpm init' first\\n\");
+        else
+            fprintf(stderr, \"failed to read %s\\n\", path);
+        g_loaded = 0;
+        return -1;
+    }
+    memset(&g_manifest, 0, sizeof(g_manifest));
+    json_get_string(data, \"name\", g_manifest.name, sizeof(g_manifest.name));
+    json_get_string(data, \"version\", g_manifest.version, sizeof(g_manifest.version));
+    json_get_string(data, \"main\", g_manifest.main, sizeof(g_manifest.main));
+    json_get_deps(data, &g_manifest);
+    g_loaded = 1;
+    return 0;
+}
+
+int manifest_write(const char *path) {
+    if (!g_loaded) {
+        if (!g_manifest.name[0]) strcpy(g_manifest.name, \"\");
+        if (!g_manifest.version[0]) strcpy(g_manifest.version, \"0.1.0\");
+        if (!g_manifest.main[0]) strcpy(g_manifest.main, \"main.qsc\");
+        g_loaded = 1;
+    }
+    char out[16384];
+    size_t pos = 0;
+    pos += (size_t)snprintf(out + pos, sizeof(out) - pos,
+        \"{\\n  \\\"name\\\": \\\"%s\\\",\\n  \\\"version\\\": \\\"%s\\\",\\n  \\\"main\\\": \\\"%s\\\",\\n  \\\"deps\\\": {\",
+        g_manifest.name, g_manifest.version, g_manifest.main);
+    for (int i = 0; i < g_manifest.dep_count; i++) {
+        pos += (size_t)snprintf(out + pos, sizeof(out) - pos,
+            \"%s\\n    \\\"%s\\\": \\\"%s\\\"\",
+            (i == 0 ? \"\" : \",\"),
+            g_manifest.deps[i].key,
+            g_manifest.deps[i].val);
+    }
+    pos += (size_t)snprintf(out + pos, sizeof(out) - pos, \"\\n  }\\n}\");
+    if (write_file(path, out) != 0) {
+        fprintf(stderr, \"failed to write %s\\n\", path);
+        return -1;
+    }
+    return 0;
+}
+
+void manifest_clear(void) {
+    memset(&g_manifest, 0, sizeof(g_manifest));
+    g_loaded = 0;
+}
+
+void manifest_set_name(const char *s) {
+    strncpy(g_manifest.name, s ? s : \"\", sizeof(g_manifest.name) - 1);
+    g_manifest.name[sizeof(g_manifest.name) - 1] = '\\0';
+    g_loaded = 1;
+}
+void manifest_set_version(const char *s) {
+    strncpy(g_manifest.version, s ? s : \"\", sizeof(g_manifest.version) - 1);
+    g_manifest.version[sizeof(g_manifest.version) - 1] = '\\0';
+    g_loaded = 1;
+}
+void manifest_set_main(const char *s) {
+    strncpy(g_manifest.main, s ? s : \"\", sizeof(g_manifest.main) - 1);
+    g_manifest.main[sizeof(g_manifest.main) - 1] = '\\0';
+    g_loaded = 1;
+}
+
+int manifest_set_dep(const char *key, const char *val) {
+    if (!key || !val) return -1;
+    g_loaded = 1;
+    for (int i = 0; i < g_manifest.dep_count; i++) {
+        if (strcmp(g_manifest.deps[i].key, key) == 0) {
+            strncpy(g_manifest.deps[i].val, val, sizeof(g_manifest.deps[i].val) - 1);
+            g_manifest.deps[i].val[sizeof(g_manifest.deps[i].val) - 1] = '\\0';
+            return 0;
+        }
+    }
+    if (g_manifest.dep_count >= MANIFEST_MAX_DEPS) return -1;
+    strncpy(g_manifest.deps[g_manifest.dep_count].key, key, sizeof(g_manifest.deps[0].key) - 1);
+    strncpy(g_manifest.deps[g_manifest.dep_count].val, val, sizeof(g_manifest.deps[0].val) - 1);
+    g_manifest.deps[g_manifest.dep_count].key[sizeof(g_manifest.deps[0].key) - 1] = '\\0';
+    g_manifest.deps[g_manifest.dep_count].val[sizeof(g_manifest.deps[0].val) - 1] = '\\0';
+    g_manifest.dep_count++;
+    return 0;
+}
+
+int manifest_dep_count(void) {
+    return g_loaded ? g_manifest.dep_count : 0;
+}
+
+/* Returns 1 if index valid; writes key/val into buffers. */
+int manifest_dep_at(int i, char *key_out, int key_n, char *val_out, int val_n) {
+    if (!g_loaded || i < 0 || i >= g_manifest.dep_count) return 0;
+    snprintf(key_out, (size_t)key_n, \"%s\", g_manifest.deps[i].key);
+    snprintf(val_out, (size_t)val_n, \"%s\", g_manifest.deps[i].val);
+    return 1;
+}
+");
+
+extern func manifest_read(path: string): number;
+extern func manifest_write(path: string): number;
+extern func manifest_clear(): void;
+extern func manifest_set_name(s: string): void;
+extern func manifest_set_version(s: string): void;
+extern func manifest_set_main(s: string): void;
+extern func manifest_set_dep(key: string, val: string): number;
+extern func manifest_dep_count(): number;
+
+func read_manifest(path: string): number {
+    return manifest_read(path);
+}
+
+func write_manifest(path: string): number {
+    return manifest_write(path);
+}
+
+func init_manifest(name: string, version: string, main_file: string): void {
+    manifest_clear();
+    manifest_set_name(name);
+    manifest_set_version(version);
+    manifest_set_main(main_file);
+}
+
+func add_dep(key: string, spec: string): number {
+    return manifest_set_dep(key, spec);
+}

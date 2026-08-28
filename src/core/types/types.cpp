@@ -7,6 +7,7 @@ enum class TokenType {
     Number,
     Double,
     String,
+    Char,
     FString,
     Keyword,
     Operator,

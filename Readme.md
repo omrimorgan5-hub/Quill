@@ -3,18 +3,20 @@
 
 ## Why Quill?
 
-- **Statically Typed** — Type errors are caught early at compile time before execution.
-- **Blazing Fast** — Transpiles directly to C and compiles with gcc for near-native performance (the transpiler itself is implemented in C++).
-- **Simple & Clean Syntax** — Readable syntax with optional semicolons and zero clutter.
-- **Module-First** — Split code across files with `import`, and pull in shared libraries straight from GitHub using [qpm](#modules--imports), Quill's package manager.
+- **Built for Math & Numerics** — First-class `number`, `double`, and `char` types, clean arithmetic, and a growing math-oriented standard library. Ideal for algorithms, calculators, simulations, and performance-sensitive numeric code.
+- **Blazing Fast** — Compiles to native machine code for near-C performance. The current pipeline transpiles to C and builds with gcc; the long-term backend is **LLVM** for direct, optimized native code generation.
+- **Statically Typed** — Type errors are caught at compile time before execution.
+- **Simple & Clean Syntax** — Readable syntax with optional semicolons and zero clutter. Spend time on the math, not the boilerplate.
 - **Cross-Platform** — Native executable support for **Linux** and **Windows**.
-- **Escape Hatch to C** — Call C library functions directly, or drop into raw C entirely with `C_call`/`C_top` when you need something Quill doesn't have natively.
+- **Escape Hatch to C** — Call C library functions directly with `extern`, or drop into raw C with `C_call` / `C_top` when you need something Quill doesn't have natively yet.
+
+Modules and the `qpm` package manager are supported, but Quill's primary focus is **fast numeric code** and a clear path to high-performance native compilation — not a large packaging ecosystem.
 
 ---
 
 ## Installation
 
-Download the pre-compiled binary for your platform from the [Releases](https://github.com/omrimorgan5-hub/Quill/releases) page.
+Download the pre-compiled binary for your platform from the [Releases](https://github.com/omo5454/Quill/releases) page.
 
 ### Windows
 Install the quill-windows[32 or 64].exe and run it in powershell.
@@ -33,10 +35,10 @@ chmod +x quill-linux
 ## Usage
 
 ```bash
-# Transpiling to C and compiling to a native binary
+# Transpile to C and compile to a native binary
 quill-[os] --compile myfile.qsc
 
-# Using the standalone transpiler CLI tool directly (produces output.c, does not compile it)
+# Transpile only (produces output.c, does not compile it)
 quill-[os] myfile.qsc -o output.c
 ```
 
@@ -62,6 +64,7 @@ let x: number = 5;
 let name: string = "Alice";
 let pi: double = 3.14;
 let active: bool = true;
+let ch: char = 'A';
 ```
 
 > **Note:** `let`, `mut`, and `const` are currently interchangeable — Quill does not yet enforce immutability. A `const` can be reassigned without error. Treat the keyword as documentation of intent for now, not a guarantee.
@@ -143,17 +146,21 @@ say greet("Alice");
 
 ### Standard Library
 
-Quill's own stdlib is intentionally small:
+Quill's own stdlib is intentionally small and math-leaning:
 
 ```quill
 len("hello")        # -> 5
 toString(42)         # -> "42"
 input(someNumberVar) # reads a number from stdin into an existing variable
+input(someCharVar)   # reads a character (skips leading whitespace)
+input(someStringVar) # reads a full line into a string
 ```
 
 `s[i]` indexes a string, returning that character's code as a `number` (the same way C represents `char`).
 
-**Bonus:** every generated file always includes C's `<stdio.h>`, `<string.h>`, `<ctype.h>`, and `<stdlib.h>` — so functions like `strcmp`, `strlen`, `isdigit`, `toupper`, `atoi`, and `rand` are callable **by name, with no special syntax**, for free.
+Math helpers live under `stdlib/math/` (sqrt, pow, floor, factorial, fib, …). Import them when you need them.
+
+**Bonus:** every generated file always includes C's `<stdio.h>`, `<string.h>`, `<ctype.h>`, and `<stdlib.h>` — so functions like `strcmp`, `strlen`, `isdigit`, `toupper`, `atoi`, and `rand` are callable **by name** once declared with `extern`, with no extra includes required.
 
 ### Calling C Directly
 
@@ -163,23 +170,18 @@ For anything else, `C_call("...")` splices raw C directly into your program, at 
 C_call("printf(\"%s\\n\", \"raw C, verbatim\");");
 ```
 
-`C_top("...")` does the same thing, but always lands at file scope, *above* `main()` — use it for `#include`s, global variables, and struct definitions.
-
-```quill
-C_top("#include <math.h>");
-```
+`C_top("...")` does the same thing, but always lands at file scope, *above* `main()` — use it for extra `#include`s, global variables, and struct definitions when needed.
 
 **Important:** any backslash you want to survive into the generated C must be doubled. Quill's own string lexer un-escapes `\n` into a real newline character *before* `C_call` ever sees it — write `\\n` to get a literal `\n` in the output.
 
 ### `extern` Functions
 
-Tell Quill about a C function's signature (implemented by a library you've linked) so it's typed correctly everywhere you use it — without emitting any C definition of your own:
+Tell Quill about a C function's signature (implemented by a library you've linked, or already available via the default headers) so it's typed correctly everywhere you use it — without emitting any C definition of your own:
 
 ```quill
-C_top("#include <math.h>");
 extern func sqrt(x: double): double;
 
-say sqrt(64);              # correctly formatted as a double, not truncated to an int
+say sqrt(64);              # correctly formatted as a double
 say "root: " + sqrt(64);
 ```
 
@@ -212,11 +214,13 @@ import "qpm_modules/repo/lib.qsc";
 
 (Adjust the path to match wherever `qpm` places the module on your machine.)
 
+Modules are available for organizing larger programs; they are not the main focus of the language.
+
 ---
 
 ## Type System
 
-Quill runs static type checking before generating C output.
+Quill runs static type checking before generating native code.
 
 | Type | Example |
 | --- | --- |
@@ -224,6 +228,7 @@ Quill runs static type checking before generating C output.
 | `double` | `3.14` |
 | `string` | `"hello"` |
 | `bool` | `true` / `false` |
+| `char` | `'A'` |
 | `void` | Functions with no return value |
 | `number[N]` / `double[N]` / `string[N]` / `bool[N]` | `let stack: number[200];` |
 
@@ -239,7 +244,7 @@ Currently has no helper file due to complexity.
 ### Linux
 
 ```bash
-git clone https://github.com/omrimorgan5-hub/Quill.git
+git clone https://github.com/omo5454/Quill.git
 cd Quill
 ./build.sh
 ```
@@ -247,18 +252,21 @@ cd Quill
 ---
 
 ## Project Structure
+
+```
 Quill/
 ├── src/
-│ └── core/
-│ ├── ast/ # AST node definitions
-│ ├── lexer/ # Tokenizer
-│ ├── parser/ # AST parser
-│ ├── transpiler/ # Quill -> C Transpiler also acts as main CLI entrypoint
-│ └── typechecker/ # Static type checker
-├── bin/ # Output directory for compiled binaries
-├── build.sh # Linux build script
-└── README.md
-
+│   └── core/
+│       ├── ast/          # AST node definitions
+│       ├── lexer/        # Tokenizer
+│       ├── parser/       # AST parser
+│       ├── transpiler/   # Quill → C pipeline (current backend) + CLI
+│       └── typechecker/  # Static type checker
+├── stdlib/               # Math, stdio, and other small libraries
+├── bin/                  # Output directory for compiled binaries
+├── build.sh              # Linux build script
+└── Readme.md
+```
 
 ---
 
@@ -275,17 +283,29 @@ Quill/
 
 ## Roadmap
 
+### Language & libraries
 * [x] Fixed-size arrays (`number`/`double`/`string`/`bool`, indexed read/write)
-* [ ] Dynamic arrays / slice operations
-* [ ] Hashmaps / Objects
-* [ ] Extended String utilities (`split`, `trim`, `replace`)
-* [ ] Native File I/O (note: raw `<stdio.h>` functions like `fopen`/`fprintf` are already callable directly, since that header is always included — there's just no dedicated Quill-native API yet)
-* [ ] Structured Error Handling (`try` / `catch`)
+* [x] `char` type and character literals
+* [x] String, number, and char `input()`
 * [x] File imports (`import "path.qsc";`)
 * [x] `extern` function declarations for typed C interop
 * [x] Raw C interop (`C_call` / `C_top`)
-* [x] Package registry (GitHub repo integration via `qpm`)
-* [x] C++ Transpiler pipeline backend rewrite
+* [ ] Dynamic arrays / slice operations
+* [ ] Hashmaps / Objects
+* [ ] Extended string utilities (`split`, `trim`, `replace`)
+* [ ] Richer math stdlib (vectors, matrices, more numeric helpers)
+* [ ] Native File I/O (raw `<stdio.h>` functions are already callable via `extern`)
+* [ ] Structured error handling (`try` / `catch`)
+
+### Compiler backend
+* [x] C++ transpiler pipeline (current: Quill → C → gcc)
+* [ ] **LLVM backend** — compile Quill directly to LLVM IR / native machine code, dropping the C intermediate step for tighter optimization and a simpler runtime story
+* [ ] Incremental improvements to the current C backend until the LLVM path is ready
+
+### Tooling
+* [x] Package manager (`qpm`) for optional GitHub-based modules
+* [ ] Better diagnostics and error messages
+* [ ] Formatter / basic IDE support
 
 ---
 

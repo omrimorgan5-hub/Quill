@@ -11,9 +11,10 @@
 # ---- Config -----------------------------------------------------------------
 
 BIN_DIR="bin"
-QPM_SRC="./cmd/qpm"
-VERSION="0.1.0"
-TARGET="win"
+QUILL_BIN="../bin/quill-linux"
+QPM_SRC="./cmd/qpm/main.qsc"
+VERSION="0.3.0"
+TARGET="linux"
 CLEAN=false
 
 # ---- Parse Arguments --------------------------------------------------------
@@ -58,7 +59,8 @@ build_binary() {
     local outfile="$3"
 
     echo -e "\033[90m  Building qpm...\033[0m"
-    GOOS="$os" GOARCH="$arch" go build -o "$BIN_DIR/$outfile" "$QPM_SRC"
+    $QUILL_BIN -o ./cmd/qpm/main.c $QPM_SRC
+    gcc -O2 -o ./bin/qpm ./cmd/qpm/qpm_main.c ./cmd/qpm/main.c -Wl,--allow-multiple-definition
     
     if [ $? -ne 0 ]; then
         write_fail "Failed to build qpm for $os/$arch"
@@ -91,23 +93,16 @@ if [ ! -d "$BIN_DIR" ]; then
     echo -e "\033[90m  Created bin/\033[0m"
 fi
 
-if ! command -v go &> /dev/null; then
-    write_fail "Go is not installed or not in PATH"
+if ! command -v ../bin/quill-linux &> /dev/null; then
+    write_fail "QUILL is not installed or not in PATH"
     exit 1
 fi
-
-GO_VERSION=$(go version)
-echo -e "\033[90m  Using $GO_VERSION\033[0m"
 
 # ---- Builds -----------------------------------------------------------------
 
 SUCCESS=true
 
 case "$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')" in
-    win)
-        write_header "Building for Windows (x64)"
-        build_binary "windows" "amd64" "qpm.exe" || SUCCESS=false
-        ;;
 
     linux)
         write_header "Building for Linux (x64)"
@@ -116,10 +111,6 @@ case "$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')" in
 
     all)
         write_header "Building for all platforms"
-
-        echo ""
-        echo -e "\033[33m  Windows x64\033[0m"
-        r1=true; build_binary "windows" "amd64" "qpm.exe" || r1=false
 
         echo ""
         echo -e "\033[33m  Linux x64\033[0m"
@@ -132,7 +123,7 @@ case "$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')" in
 
     *)
         write_fail "Unknown target: $TARGET"
-        echo -e "\033[90m  Valid targets: win, linux, mac, mac-arm, all\033[0m"
+        echo -e "\033[90m  Valid targets: linux, all\033[0m"
         exit 1
         ;;
 esac

@@ -61,7 +61,10 @@ private:
     {
         if (token.type != TokenType::Operator)
             return false;
-        static const std::vector<std::string> ops = {"+", "-", "*", "/", "%", "==", "!=", ">", "<", ">=", "<=", "&&", "||"};
+        static const std::vector<std::string> ops = {
+            "+", "-", "*", "/", "%", "==", "!=", ">", "<", ">=", "<=", "&&", "||",
+            "&", "|", "^", "<<", ">>"
+        };
         return std::find(ops.begin(), ops.end(), token.value) != ops.end();
     }
 
@@ -128,6 +131,16 @@ private:
             return parseWhileLoop();
         }
 
+        if (peek().value == "for")
+        {
+            return parseForLoop();
+        }
+
+        if (peek().value == "struct")
+        {
+            return parseStructDecl();
+        }
+
         if (peek().value == "import")
         {
             return parseImportStatement();
@@ -138,7 +151,7 @@ private:
             return parseIdentifierStatement();
         }
 
-        if (peek().type == TokenType::Number || peek().type == TokenType::Double || peek().type == TokenType::String)
+        if (peek().type == TokenType::Number || peek().type == TokenType::Double || peek().type == TokenType::String || peek().type == TokenType::Char)
         {
             return parseLiteralStatement();
         }
@@ -164,24 +177,44 @@ private:
             advance();
             type = advance().value;
 
-            // Array type: `number[200]` -- a fixed size, given as a
-            // literal, folded straight into the type string ("number[200]")
-            // so nothing else needs a new AST field for it.
-            if (peek().value == "[")
+            // map[K, V]  -- associative map
+            if (type == "map" && peek().value == "[")
+            {
+                advance(); // [
+                std::string keyT = advance().value;
+                if (peek().value == ",")
+                    advance();
+                std::string valT = advance().value;
+                if (peek().value == "]")
+                    advance();
+                type = "map[" + keyT + "," + valT + "]";
+            }
+            // Array types:
+            //   number[200]  -- fixed size
+            //   number[]     -- dynamic (growable) array
+            else if (peek().value == "[")
             {
                 advance();
-                std::string sizeTok = advance().value;
-                type += "[" + sizeTok + "]";
                 if (peek().value == "]")
                 {
                     advance();
+                    type += "[]";
+                }
+                else
+                {
+                    std::string sizeTok = advance().value;
+                    type += "[" + sizeTok + "]";
+                    if (peek().value == "]")
+                    {
+                        advance();
+                    }
                 }
             }
         }
 
-        // Arrays are declared with a fixed size and no initializer --
-        // `let nums: number[5];` -- so only parse a value if `=` was
-        // actually written.
+        // Arrays may be declared without an initializer
+        // (`let nums: number[5];` / `let xs: number[];`) or with one
+        // (`let xs: number[] = [1, 2, 3];`).
         Node *value = nullptr;
         if (peek().value == "=")
         {
@@ -378,9 +411,121 @@ private:
         return node;
     }
 
+
+    Node *parseStructDecl()
+    {
+        advance(); // struct
+        StructDecl *node = new StructDecl();
+        node->name = advance().value;
+        if (peek().value == "{")
+            advance();
+        while (!isAtEnd() && peek().value != "}")
+        {
+            if (peek().type == TokenType::Comment)
+            {
+                advance();
+                continue;
+            }
+            StructField field;
+            field.name = advance().value;
+            if (peek().value == ":")
+            {
+                advance();
+                field.type = advance().value;
+                // optional array suffix on field type
+                if (peek().value == "[")
+                {
+                    advance();
+                    if (peek().value == "]")
+                    {
+                        advance();
+                        field.type += "[]";
+                    }
+                    else
+                    {
+                        std::string sz = advance().value;
+                        field.type += "[" + sz + "]";
+                        if (peek().value == "]")
+                            advance();
+                    }
+                }
+            }
+            else
+            {
+                field.type = "number";
+            }
+            node->fields.push_back(field);
+            if (peek().value == ",")
+                advance();
+        }
+        if (peek().value == "}")
+            advance();
+        return node;
+    }
+
+    Node *parseForLoop()
+    {
+        advance(); // for
+        ForLoop *node = new ForLoop();
+        node->iterator = advance().value;
+        if (peek().value == "in")
+            advance();
+
+        // Parse the iterable. Support explicit range: <expr> .. <expr>
+        // without relying on the binary-operator table for "..".
+        Node *first = parsePrecedence(0);
+        if (peek().value == "..")
+        {
+            advance();
+            node->start = first;
+            node->end = parsePrecedence(0);
+        }
+        else
+        {
+            node->collection = first;
+        }
+
+        if (peek().value == "{")
+            advance();
+        while (!isAtEnd() && peek().value != "}")
+        {
+            Node *stmt = parseStatement();
+            if (stmt)
+                node->body.push_back(stmt);
+        }
+        if (peek().value == "}")
+            advance();
+        return node;
+    }
+
     Node *parseIdentifierStatement()
     {
         std::string name = advance().value;
+
+        // Field assign: name.field = expr
+        if (peek().value == ".")
+        {
+            advance();
+            std::string field = advance().value;
+            if (peek().value == "=")
+            {
+                advance();
+                FieldAssignment *fa = new FieldAssignment();
+                Identifier *obj = new Identifier();
+                obj->name = name;
+                fa->object = obj;
+                fa->field = field;
+                fa->value = parseExpression();
+                return fa;
+            }
+            // bare field access as statement
+            FieldAccess *acc = new FieldAccess();
+            Identifier *obj = new Identifier();
+            obj->name = name;
+            acc->object = obj;
+            acc->field = field;
+            return acc;
+        }
 
         if (peek().value == "[")
         {
@@ -489,6 +634,21 @@ private:
             return val;
         }
 
+        if (tok.type == TokenType::Char) {
+            LiteralChar *val = new LiteralChar();
+
+            if (tok.value.empty()) {
+                // malformed / empty char literal – decide your error policy
+                // Option A: treat as null character
+                val->value = '0';
+                // Option B: return an error node / report and recover
+            } else {
+                val->value = static_cast<unsigned char>(tok.value[0]);  // or just tok.value[0]
+            }
+
+            return val;
+        }
+
         if (tok.value == "true")
         {
             LiteralBool *val = new LiteralBool();
@@ -544,14 +704,24 @@ private:
             return 1;
         if (op == "&&")
             return 2;
-        if (op == "==" || op == "!=")
+        if (op == "|")
             return 3;
-        if (op == "<" || op == ">" || op == "<=" || op == ">=")
+        if (op == "^")
             return 4;
-        if (op == "+" || op == "-")
+        if (op == "&")
             return 5;
-        if (op == "*" || op == "/" || op == "%")
+        if (op == "==" || op == "!=")
             return 6;
+        if (op == "<" || op == ">" || op == "<=" || op == ">=")
+            return 7;
+        if (op == "<<" || op == ">>")
+            return 8;
+        if (op == "+" || op == "-")
+            return 9;
+        if (op == "*" || op == "/" || op == "%")
+            return 10;
+        if (op == "..")
+            return 11; // only used inside for-range parsing as a marker
         return -1;
     }
 
@@ -580,6 +750,59 @@ private:
                 return node;
             }
 
+            // Struct literal: Name { field: value, ... }
+            // Lookahead: only if after "{" we see `ident :` — otherwise
+            // `for x in nums { ... }` would steal the for-body brace.
+            if (peek().value == "{")
+            {
+                // peek tokens: index_, tokens_
+                bool isStructLit = false;
+                if (index_ + 1 < tokens_.size())
+                {
+                    const Token &t1 = tokens_[index_ + 1]; // after current '{'
+                    // Actually peek() is '{', so index_ points at '{'. Next is index_+1
+                }
+                if (index_ + 2 < tokens_.size())
+                {
+                    // tokens_[index_] is '{', [index_+1] should be field name, [index_+2] ':'
+                    const Token &fnameTok = tokens_[index_ + 1];
+                    const Token &colonTok = tokens_[index_ + 2];
+                    if ((fnameTok.type == TokenType::Identifier || fnameTok.type == TokenType::Keyword) &&
+                        colonTok.value == ":")
+                    {
+                        isStructLit = true;
+                    }
+                    // empty struct literal Name {}
+                    if (fnameTok.value == "}")
+                        isStructLit = true;
+                }
+                if (isStructLit)
+                {
+                    advance(); // {
+                    StructLiteral *lit = new StructLiteral();
+                    lit->name = name;
+                    while (!isAtEnd() && peek().value != "}")
+                    {
+                        if (peek().type == TokenType::Comment)
+                        {
+                            advance();
+                            continue;
+                        }
+                        std::string fname = advance().value;
+                        if (peek().value == ":")
+                            advance();
+                        Node *fval = parseExpression();
+                        lit->fieldNames.push_back(fname);
+                        lit->fieldValues.push_back(fval);
+                        if (peek().value == ",")
+                            advance();
+                    }
+                    if (peek().value == "}")
+                        advance();
+                    return lit;
+                }
+            }
+
             if (peek().value == "[")
             {
                 advance();
@@ -593,6 +816,24 @@ private:
                     advance();
                 }
                 return idx;
+            }
+
+            // Field access: name.field (possibly chained later)
+            if (peek().value == ".")
+            {
+                Node *obj = nullptr;
+                Identifier *id = new Identifier();
+                id->name = name;
+                obj = id;
+                while (peek().value == ".")
+                {
+                    advance();
+                    FieldAccess *acc = new FieldAccess();
+                    acc->object = obj;
+                    acc->field = advance().value;
+                    obj = acc;
+                }
+                return obj;
             }
 
             Identifier *node = new Identifier();
@@ -621,6 +862,18 @@ private:
             return val;
         }
 
+        if (peek().type == TokenType::Char)
+        {
+            Token tok = advance();
+            LiteralChar *val = new LiteralChar();
+            if (tok.value.empty()) {
+                val->value = '\0';          // better than '0'
+            } else {
+                val->value = static_cast<unsigned char>(tok.value[0]);
+            }
+            return val;
+        }
+
         if (peek().value == "true" || peek().value == "false")
         {
             LiteralBool *val = new LiteralBool();
@@ -639,7 +892,27 @@ private:
             return inner;
         }
 
-        if (peek().type == TokenType::Operator && (peek().value == "!" || peek().value == "-"))
+        // Array literal: [1, 2, 3] or []
+        if (peek().value == "[")
+        {
+            advance();
+            ArrayLiteral *lit = new ArrayLiteral();
+            while (!isAtEnd() && peek().value != "]")
+            {
+                lit->elements.push_back(parseExpression());
+                if (peek().value == ",")
+                {
+                    advance();
+                }
+            }
+            if (peek().value == "]")
+            {
+                advance();
+            }
+            return lit;
+        }
+
+        if (peek().type == TokenType::Operator && (peek().value == "!" || peek().value == "-" || peek().value == "~"))
         {
             UnaryExpression *node = new UnaryExpression();
             node->op = advance().value;

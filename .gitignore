@@ -18,4 +18,8 @@ tests/.tmp/
 # Misc
 .DS_Store
 Thumbs.db
-extension
+node_modules
+
+# testing
+quill.json
+modules

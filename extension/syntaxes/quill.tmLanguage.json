@@ -1,0 +1,178 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Quill",
+  "scopeName": "source.quill",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#types" },
+    { "include": "#function-declaration" },
+    { "include": "#function-call" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.quill",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.quill",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.quill",
+              "match": "\\\\(n|t|\"|\\\\)"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.quill",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.quill",
+              "match": "\\\\(n|t|'|\\\\)"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.quill",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.quill",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.conditional.quill",
+          "match": "\\b(if|else|elif)\\b"
+        },
+        {
+          "name": "keyword.control.loop.quill",
+          "match": "\\b(while)\\b"
+        },
+        {
+          "name": "keyword.control.flow.quill",
+          "match": "\\b(return)\\b"
+        },
+        {
+          "name": "keyword.other.declaration.quill",
+          "match": "\\b(let|mut|const)\\b"
+        },
+        {
+          "name": "keyword.other.function.quill",
+          "match": "\\b(func)\\b"
+        },
+        {
+          "name": "keyword.other.module.quill",
+          "match": "\\b(import|extern)\\b"
+        },
+        {
+          "name": "keyword.other.print.quill",
+          "match": "\\b(printf|say)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.quill",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "comment": "Type names are ordinary identifiers to the lexer, not reserved keywords -- highlighted here when they appear where a type is written (after a colon in a let/param/return annotation).",
+      "patterns": [
+        {
+          "match": "(:)\\s*(number|double|string|bool|void)\\b",
+          "captures": {
+            "1": { "name": "punctuation.separator.annotation.quill" },
+            "2": { "name": "support.type.quill" }
+          }
+        }
+      ]
+    },
+    "function-declaration": {
+      "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.function.quill" },
+        "2": { "name": "entity.name.function.quill" }
+      }
+    },
+    "function-call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.quill" }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.increment-decrement.quill",
+          "match": "(\\+\\+|--)"
+        },
+        {
+          "name": "keyword.operator.comparison.quill",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.quill",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.assignment.quill",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arithmetic.quill",
+          "match": "(\\+|-|\\*|/|%)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.colon.quill",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.separator.comma.quill",
+          "match": ","
+        },
+        {
+          "name": "punctuation.section.braces.quill",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.brackets.quill",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.section.parens.quill",
+          "match": "[()]"
+        }
+      ]
+    }
+  }
+}

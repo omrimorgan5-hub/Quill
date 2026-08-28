@@ -1,0 +1,38 @@
+{
+  "name": "quill-language",
+  "publisher": "quill-school",
+  "displayName": "Quill Language Support",
+  "description": "Syntax highlighting for Quill (.qsc) files",
+  "version": "0.3.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "quill",
+        "aliases": [
+          "Quill",
+          "quill"
+        ],
+        "extensions": [
+          ".qsc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "quill",
+        "scopeName": "source.quill",
+        "path": "./syntaxes/quill.tmLanguage.json"
+      }
+    ]
+  },
+  "dependencies": {
+    "vsce": "^2.15.0"
+  }
+}

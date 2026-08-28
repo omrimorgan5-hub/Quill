@@ -1,0 +1,284 @@
+# qpm.qsc  –  Quill Package Manager CLI entrypoint
+# Mirrors Go: import deps + manifest, then dispatch commands
+
+import "../../internal/deps/deps.qsc";
+import "../../internal/manifest/manifest.qsc";
+
+C_top("
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <libgen.h>
+
+/* argv bridge: Quill's generated main is main(void), so a small C
+   forwarder sets these before calling qpm_run(). */
+static int g_argc = 0;
+static char **g_argv = 0;
+
+void qpm_set_args(int argc, char **argv) {
+    g_argc = argc;
+    g_argv = argv;
+}
+
+int qpm_argc(void) { return g_argc; }
+
+/* Returns argv[i] or empty string if out of range */
+const char *qpm_arg(int i) {
+    if (!g_argv || i < 0 || i >= g_argc) return \"\";
+    return g_argv[i] ? g_argv[i] : \"\";
+}
+
+void qpm_print_usage(void) {
+    puts(
+        \"qpm — Quill Package Manager\\n\"
+        \"\\n\"
+        \"Usage:\\n\"
+        \"  qpm init                Create quill.json in current directory\\n\"
+        \"  qpm add <spec>          Add a dependency (e.g., qpm add omri/math)\\n\"
+        \"  qpm install             Install all dependencies from quill.json\\n\"
+        \"  qpm update              Update all dependencies to latest\\n\"
+        \"  qpm list                List installed dependencies\\n\"
+        \"\\n\"
+        \"Dependency spec format:\\n\"
+        \"  user/repo               Short form (uses github, latest)\\n\"
+        \"  user/repo#v1.2.0        Pin to tag or commit\\n\"
+        \"  github:user/repo#abc    Full form with host and ref\"
+    );
+}
+
+/* cwd base name for init */
+void qpm_cwd_base(char *out, int n) {
+    char cwd[512];
+    if (!getcwd(cwd, sizeof(cwd))) {
+        snprintf(out, (size_t)n, \"project\");
+        return;
+    }
+    char *base = basename(cwd);
+    snprintf(out, (size_t)n, \"%s\", base ? base : \"project\");
+}
+");
+
+extern func qpm_set_args(argc: number, argv: number): void;
+extern func qpm_argc(): number;
+extern func qpm_print_usage(): void;
+
+# ---- commands (Quill side) ---------------------------------------------------
+
+func run_init(): number {
+    # Use C to get directory basename into a fixed buffer via C_call
+    C_call("char _qpm_name[256]; qpm_cwd_base(_qpm_name, 256);");
+    C_call("manifest_clear(); manifest_set_name(_qpm_name); manifest_set_version(\"0.1.0\"); manifest_set_main(\"main.qsc\");");
+    if write_manifest("quill.json") != 0 {
+        say "error: failed to write quill.json";
+        return 1;
+    }
+    say "Created quill.json";
+    return 0;
+}
+
+func run_add(spec: string): number {
+    if read_manifest("quill.json") != 0 {
+        return 1;
+    }
+    if parse_spec_ok(spec) == false {
+        say "error parsing spec";
+        return 1;
+    }
+
+    printf("Adding " + spec + "...");
+    if install(spec, "modules") != 0 {
+        say "error installing";
+        return 1;
+    }
+
+    # Record in manifest: key = full name form, value = full string form
+    # deps_info is C-only; approximate with the raw spec for both sides
+    if add_dep(spec, spec) != 0 {
+        say "error writing dep into manifest";
+        return 1;
+    }
+    if write_manifest("quill.json") != 0 {
+        return 1;
+    }
+    printf("Added " + spec);
+    return 0;
+}
+
+func run_install(): number {
+    if read_manifest("quill.json") != 0 {
+        return 1;
+    }
+    let n: number = manifest_dep_count();
+    if n == 0 {
+        say "No dependencies to install";
+        return 0;
+    }
+
+    # Iterate deps via C helper loop (Quill can't easily pull string pairs yet)
+    C_call("
+        for (int i = 0; i < manifest_dep_count(); i++) {
+            char key[256], val[256];
+            if (!manifest_dep_at(i, key, 256, val, 256)) continue;
+            printf(\"Installing %s...\\n\", key);
+            if (deps_install(val, \"modules\") != 0) {
+                fprintf(stderr, \"error installing %s\\n\", key);
+            }
+        }
+    ");
+    say "Done";
+    return 0;
+}
+
+func run_update(): number {
+    if read_manifest("quill.json") != 0 {
+        return 1;
+    }
+    C_call("
+        for (int i = 0; i < manifest_dep_count(); i++) {
+            char key[256], val[256];
+            if (!manifest_dep_at(i, key, 256, val, 256)) continue;
+            printf(\"Updating %s...\\n\", key);
+            if (deps_update(val, \"modules\") != 0) {
+                fprintf(stderr, \"error updating %s\\n\", key);
+            }
+        }
+    ");
+    say "Done";
+    return 0;
+}
+
+func run_list(): number {
+    if read_manifest("quill.json") != 0 {
+        return 1;
+    }
+    let n: number = manifest_dep_count();
+    if n == 0 {
+        say "No dependencies";
+        return 0;
+    }
+    say "Dependencies:";
+    C_call("
+        for (int i = 0; i < manifest_dep_count(); i++) {
+            char key[256], val[256];
+            if (!manifest_dep_at(i, key, 256, val, 256)) continue;
+            printf(\"  %s => %s\\n\", key, val);
+        }
+    ");
+    return 0;
+}
+
+func run_qpm(): number {
+    extern func qpm_print_usage();
+    let argc: number = qpm_argc();
+    if argc < 2 {
+        C_call("qpm_print_usage();")
+        return 1;
+    }
+
+    # Command string comparison via C (Quill has no native argv strings yet)
+    C_call("
+        const char *cmd = qpm_arg(1);
+        int rc = 1;
+        if (strcmp(cmd, \"init\") == 0) {
+            /* call back into logic: simplest is inline for init */
+            char name[256];
+            qpm_cwd_base(name, 256);
+            manifest_clear();
+            manifest_set_name(name);
+            manifest_set_version(\"0.1.0\");
+            manifest_set_main(\"main.qsc\");
+            rc = manifest_write(\"quill.json\");
+            if (rc == 0) puts(\"Created quill.json\");
+            rc = rc == 0 ? 0 : 1;
+        } else if (strcmp(cmd, \"add\") == 0) {
+            if (qpm_argc() < 3) {
+                fprintf(stderr, \"usage: qpm add <spec>\\n\");
+                rc = 1;
+            } else {
+                const char *spec = qpm_arg(2);
+                if (manifest_read(\"quill.json\") != 0) rc = 1;
+                else if (deps_parse_ok(spec) == 0) {
+                    fprintf(stderr, \"error parsing spec\\n\");
+                    rc = 1;
+                } else {
+                    printf(\"Adding %s...\\n\", spec);
+                    if (deps_install(spec, \"modules\") != 0) {
+                        fprintf(stderr, \"error installing\\n\");
+                        rc = 1;
+                    } else {
+                        char full[256], as_str[320];
+                        if (deps_info(spec, full, 256, as_str, 320) == 0) {
+                            manifest_set_dep(full, as_str);
+                        } else {
+                            manifest_set_dep(spec, spec);
+                        }
+                        if (manifest_write(\"quill.json\") != 0) rc = 1;
+                        else {
+                            printf(\"Added %s\\n\", spec);
+                            rc = 0;
+                        }
+                    }
+                }
+            }
+        } else if (strcmp(cmd, \"install\") == 0) {
+            if (manifest_read(\"quill.json\") != 0) rc = 1;
+            else if (manifest_dep_count() == 0) {
+                puts(\"No dependencies to install\");
+                rc = 0;
+            } else {
+                for (int i = 0; i < manifest_dep_count(); i++) {
+                    char key[256], val[256];
+                    if (!manifest_dep_at(i, key, 256, val, 256)) continue;
+                    printf(\"Installing %s...\\n\", key);
+                    if (deps_install(val, \"modules\") != 0) {
+                        fprintf(stderr, \"error installing %s\\n\", key);
+                        rc = 1;
+                        break;
+                    }
+                    rc = 0;
+                }
+                if (rc == 0) puts(\"Done\");
+            }
+        } else if (strcmp(cmd, \"update\") == 0) {
+            if (manifest_read(\"quill.json\") != 0) rc = 1;
+            else {
+                for (int i = 0; i < manifest_dep_count(); i++) {
+                    char key[256], val[256];
+                    if (!manifest_dep_at(i, key, 256, val, 256)) continue;
+                    printf(\"Updating %s...\\n\", key);
+                    if (deps_update(val, \"modules\") != 0)
+                        fprintf(stderr, \"error updating %s\\n\", key);
+                }
+                puts(\"Done\");
+                rc = 0;
+            }
+        } else if (strcmp(cmd, \"list\") == 0 || strcmp(cmd, \"ls\") == 0) {
+            if (manifest_read(\"quill.json\") != 0) rc = 1;
+            else if (manifest_dep_count() == 0) {
+                puts(\"No dependencies\");
+                rc = 0;
+            } else {
+                puts(\"Dependencies:\");
+                for (int i = 0; i < manifest_dep_count(); i++) {
+                    char key[256], val[256];
+                    if (!manifest_dep_at(i, key, 256, val, 256)) continue;
+                    printf(\"  %s => %s\\n\", key, val);
+                }
+                rc = 0;
+            }
+        } else {
+            fprintf(stderr, \"unknown command: %s\\n\", cmd);
+            qpm_print_usage();
+            rc = 1;
+        }
+        /* stash rc for Quill */
+        int qpm_last_rc;
+        qpm_last_rc = rc;
+    ");
+
+    C_top("qpm_last_rc = 1;");
+    return C_call("qpm_last_rc");
+}
+
+# Entrypoint when used with the argv forwarder:
+# let code: number = run_qpm();

@@ -1,0 +1,182 @@
+# deps.qsc  –  dependency parse / install / update
+
+C_top("
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <errno.h>
+
+typedef struct {
+    char host[64];
+    char user[128];
+    char repo[128];
+    char ref[128];
+} DepSpec;
+
+static void dep_full_name(const DepSpec *d, char *out, size_t n) {
+    snprintf(out, n, \"%s/%s\", d->user, d->repo);
+}
+
+static void dep_string(const DepSpec *d, char *out, size_t n) {
+    const char *ref = d->ref[0] ? d->ref : \"latest\";
+    snprintf(out, n, \"%s:%s/%s#%s\", d->host, d->user, d->repo, ref);
+}
+
+static int parse_spec(const char *s, DepSpec *out) {
+    char buf[512];
+    strncpy(buf, s, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\\0';
+
+    char *p = buf;
+    while (*p == ' ' || *p == '\\t') p++;
+    char *end = p + strlen(p);
+    while (end > p && (end[-1] == ' ' || end[-1] == '\\t')) *--end = '\\0';
+
+    char host[64] = \"github\";
+    char *rest = p;
+    char *colon = strchr(p, ':');
+    if (colon) {
+        *colon = '\\0';
+        strncpy(host, p, sizeof(host) - 1);
+        rest = colon + 1;
+    }
+
+    char ref[128] = \"\";
+    char *hash = strchr(rest, '#');
+    if (hash) {
+        *hash = '\\0';
+        strncpy(ref, hash + 1, sizeof(ref) - 1);
+    }
+
+    char *slash = strchr(rest, '/');
+    if (!slash || slash == rest || !*(slash + 1) || strchr(slash + 1, '/'))
+        return -1;
+    *slash = '\\0';
+
+    memset(out, 0, sizeof(*out));
+    strncpy(out->host, host, sizeof(out->host) - 1);
+    strncpy(out->user, rest, sizeof(out->user) - 1);
+    strncpy(out->repo, slash + 1, sizeof(out->repo) - 1);
+    strncpy(out->ref, ref, sizeof(out->ref) - 1);
+    return 0;
+}
+
+static int path_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+static int run_cmd(const char *cmd) {
+    return system(cmd) == 0 ? 0 : -1;
+}
+
+static int install_dep(const DepSpec *dep, const char *modulesDir) {
+    char dest[512];
+    snprintf(dest, sizeof(dest), \"%s/%s/%s\", modulesDir, dep->user, dep->repo);
+
+    if (path_exists(dest)) {
+        fprintf(stderr, \"%s/%s already exists — run 'qpm update' instead\\n\",
+                dep->user, dep->repo);
+        return -1;
+    }
+
+    char parent[512];
+    snprintf(parent, sizeof(parent), \"%s/%s\", modulesDir, dep->user);
+    char mkdir_cmd[640];
+    snprintf(mkdir_cmd, sizeof(mkdir_cmd), \"mkdir -p '%s'\", parent);
+    if (run_cmd(mkdir_cmd) != 0) return -1;
+
+    char url[512];
+    snprintf(url, sizeof(url), \"https://%s.com/%s/%s.git\",
+             dep->host, dep->user, dep->repo);
+
+    char clone_cmd[2048];
+    if (dep->ref[0]) {
+        snprintf(clone_cmd, sizeof(clone_cmd),
+            \"git clone --depth 1 --branch '%s' '%s' '%s'\",
+            dep->ref, url, dest);
+    } else {
+        snprintf(clone_cmd, sizeof(clone_cmd),
+            \"git clone --depth 1 '%s' '%s'\", url, dest);
+    }
+
+    if (run_cmd(clone_cmd) != 0) {
+        char rm_cmd[640];
+        snprintf(rm_cmd, sizeof(rm_cmd), \"rm -rf '%s'\", dest);
+        run_cmd(rm_cmd);
+        fprintf(stderr, \"git clone failed\\n\");
+        return -1;
+    }
+    return 0;
+}
+
+static int update_dep(const DepSpec *dep, const char *modulesDir) {
+    char dest[512];
+    snprintf(dest, sizeof(dest), \"%s/%s/%s\", modulesDir, dep->user, dep->repo);
+
+    if (!path_exists(dest))
+        return install_dep(dep, modulesDir);
+
+    char pull_cmd[640];
+    snprintf(pull_cmd, sizeof(pull_cmd), \"git -C '%s' pull --ff-only\", dest);
+    if (run_cmd(pull_cmd) != 0) {
+        fprintf(stderr, \"git pull failed\\n\");
+        return -1;
+    }
+
+    if (dep->ref[0]) {
+        char co_cmd[720];
+        snprintf(co_cmd, sizeof(co_cmd),
+            \"git -C '%s' checkout '%s'\", dest, dep->ref);
+        if (run_cmd(co_cmd) != 0) {
+            fprintf(stderr, \"checkout failed\\n\");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Quill-facing API */
+int deps_parse_ok(const char *spec) {
+    DepSpec d;
+    return parse_spec(spec, &d) == 0 ? 1 : 0;
+}
+
+int deps_install(const char *spec, const char *modulesDir) {
+    DepSpec d;
+    if (parse_spec(spec, &d) != 0) return -1;
+    return install_dep(&d, modulesDir);
+}
+
+int deps_update(const char *spec, const char *modulesDir) {
+    DepSpec d;
+    if (parse_spec(spec, &d) != 0) return -1;
+    return update_dep(&d, modulesDir);
+}
+
+/* Fills out buffers with user/repo and full string form. */
+int deps_info(const char *spec, char *full_out, int full_n, char *str_out, int str_n) {
+    DepSpec d;
+    if (parse_spec(spec, &d) != 0) return -1;
+    dep_full_name(&d, full_out, (size_t)full_n);
+    dep_string(&d, str_out, (size_t)str_n);
+    return 0;
+}
+");
+
+extern func deps_parse_ok(spec: string): number;
+extern func deps_install(spec: string, modulesDir: string): number;
+extern func deps_update(spec: string, modulesDir: string): number;
+
+func parse_spec_ok(s: string): bool {
+    return deps_parse_ok(s) == 1;
+}
+
+func install(spec: string, modulesDir: string): number {
+    return deps_install(spec, modulesDir);
+}
+
+func update(spec: string, modulesDir: string): number {
+    return deps_update(spec, modulesDir);
+}
