@@ -1,4 +1,0 @@
-func println(s: string)
-{
-    printf(s + "\\n")
-}

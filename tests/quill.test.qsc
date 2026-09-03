@@ -77,7 +77,7 @@ if (a <= 10) {
 
 # ─── If / else if / else ─────────────────────────────────────────────────────
 
-let score = 75;
+let score = 60;
 
 if (score >= 90) {
     say "Grade: A";

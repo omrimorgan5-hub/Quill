@@ -3,7 +3,7 @@
   "publisher": "quill-school",
   "displayName": "Quill Language Support",
   "description": "Syntax highlighting for Quill (.qsc) files",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "engines": {
     "vscode": "^1.75.0"
   },

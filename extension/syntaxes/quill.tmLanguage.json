@@ -6,11 +6,11 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#numbers" },
-    { "include": "#keywords" },
-    { "include": "#constants" },
-    { "include": "#types" },
     { "include": "#function-declaration" },
     { "include": "#function-call" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
     { "include": "#operators" },
     { "include": "#punctuation" }
   ],
@@ -80,16 +80,24 @@
           "match": "\\b(let|mut|const)\\b"
         },
         {
-          "name": "keyword.other.function.quill",
-          "match": "\\b(func)\\b"
+          "name": "storage.type.function.quill",
+          "match": "\\b(func|fn)\\b"
         },
         {
           "name": "keyword.other.module.quill",
           "match": "\\b(import|extern)\\b"
         },
         {
-          "name": "keyword.other.print.quill",
-          "match": "\\b(printf|say)\\b"
+          "name": "support.function.builtin.quill",
+          "match": "\\b(printf|say|println|print)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.quill",
+          "match": "\\b(number|double|string|bool|char|void)\\b"
         }
       ]
     },
@@ -101,22 +109,10 @@
         }
       ]
     },
-    "types": {
-      "comment": "Type names are ordinary identifiers to the lexer, not reserved keywords -- highlighted here when they appear where a type is written (after a colon in a let/param/return annotation).",
-      "patterns": [
-        {
-          "match": "(:)\\s*(number|double|string|bool|void)\\b",
-          "captures": {
-            "1": { "name": "punctuation.separator.annotation.quill" },
-            "2": { "name": "support.type.quill" }
-          }
-        }
-      ]
-    },
     "function-declaration": {
-      "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "match": "\\b(func|fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
       "captures": {
-        "1": { "name": "keyword.other.function.quill" },
+        "1": { "name": "storage.type.function.quill" },
         "2": { "name": "entity.name.function.quill" }
       }
     },

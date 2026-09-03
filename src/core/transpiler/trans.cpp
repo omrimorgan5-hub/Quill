@@ -1505,6 +1505,7 @@ int main(int argc, char **argv)
     bool transpileMode = false;
     bool compileC = false;
     bool typeCheck = false;
+    bool format = false;
     std::string outputPath;
     std::vector<std::string> args;
 
@@ -1543,6 +1544,10 @@ int main(int argc, char **argv)
                 return 1;
             }
             outputPath = argv[++i];
+        }
+        else if (arg == "-f" || arg == "--format")
+        {
+            format = true;
         }
         else
         {
@@ -1635,6 +1640,7 @@ int main(int argc, char **argv)
         std::cout << "  wrote: " << cPath << "\n";
     }
 
+
     if (!compileC)
     {
         return 0;
@@ -1648,6 +1654,16 @@ int main(int argc, char **argv)
     if (outputPath.find(".c") != std::string::npos)
     {
         binaryPath = outputPath.substr(0, outputPath.size() - 2);
+    }
+    if (format) 
+    {
+        std::string formatCommand = "clang-format -style=Google -i " + cPath + "";
+        int result = std::system(formatCommand.c_str());
+        if (result != 0)
+        {
+            std::cerr << "failed to compile generated C: " << cPath << "\n";
+            return 1;
+        }
     }
 
     std::string gccCommand = "gcc -std=c11 -Wall -Wextra -pedantic -Wno-unused-function \"" + cPath + "\" -o \"" + binaryPath + "\"";
